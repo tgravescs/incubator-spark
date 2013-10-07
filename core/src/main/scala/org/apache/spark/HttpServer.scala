@@ -20,13 +20,16 @@ package org.apache.spark
 import java.io.File
 import java.net.InetAddress
 
+import org.eclipse.jetty.util.security.{Constraint, Password}
+import org.eclipse.jetty.security.authentication.DigestAuthenticator
+import org.eclipse.jetty.security.{ConstraintMapping, ConstraintSecurityHandler, HashLoginService, SecurityHandler}
+
 import org.eclipse.jetty.server.Server
 import org.eclipse.jetty.server.bio.SocketConnector
-import org.eclipse.jetty.server.handler.DefaultHandler
-import org.eclipse.jetty.server.handler.HandlerList
-import org.eclipse.jetty.server.handler.ResourceHandler
+import org.eclipse.jetty.server.handler.{DefaultHandler, HandlerList, ResourceHandler}
 import org.eclipse.jetty.util.thread.QueuedThreadPool
 import org.apache.spark.util.Utils
+
 
 /**
  * Exception type thrown by HttpServer when it is in the wrong state for an operation.
@@ -58,9 +61,47 @@ private[spark] class HttpServer(resourceBase: File) extends Logging {
       server.setThreadPool(threadPool)
       val resHandler = new ResourceHandler
       resHandler.setResourceBase(resourceBase.getAbsolutePath)
-      val handlerList = new HandlerList
-      handlerList.setHandlers(Array(resHandler, new DefaultHandler))
-      server.setHandler(handlerList)
+
+      if (SecurityManager.isAuthenticationEnabled()) {
+        logDebug("server is using security")
+        val constraint = new Constraint()
+        constraint.setName(Constraint.__DIGEST_AUTH)
+        constraint.setRoles(Array("user"))
+        constraint.setAuthenticate(true)
+        constraint.setDataConstraint(Constraint.DC_NONE)
+ 
+        val cm = new ConstraintMapping()
+        cm.setConstraint(constraint)
+        cm.setPathSpec("/*")
+  
+        val sh = new ConstraintSecurityHandler()
+
+        // the hashLoginService lets us do a simply user and
+        // secret right now. This could be changed to use the
+        // JAASLoginService for other options. 
+        val hashLogin = new HashLoginService()
+
+        val userCred = new Password(SecurityManager.getSecretKey())
+        hashLogin.putUser(SecurityManager.getHttpUser(), userCred, Array("user"))
+
+        logDebug("hashlogin loading user: " + hashLogin.getUsers())
+
+        sh.setLoginService(hashLogin)
+        sh.setAuthenticator(new DigestAuthenticator());
+        sh.setConstraintMappings(Array(cm))
+
+        // make sure we go through security handler to get resources
+        val handlerList = new HandlerList
+        handlerList.setHandlers(Array(resHandler, new DefaultHandler))
+        sh.setHandler(handlerList)
+        server.setHandler(sh)
+      } else {
+        logDebug("server is not using security")
+        val handlerList = new HandlerList
+        handlerList.setHandlers(Array(resHandler, new DefaultHandler))
+        server.setHandler(handlerList)
+      }
+
       server.start()
       port = server.getConnectors()(0).getLocalPort()
     }

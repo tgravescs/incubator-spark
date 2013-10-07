@@ -21,7 +21,9 @@ import java.net.Socket
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import org.apache.hadoop.conf.Configuration
+import org.apache.hadoop.io.Text
 import org.apache.hadoop.net.NetUtils
+import org.apache.hadoop.security.Credentials
 import org.apache.hadoop.yarn.api._
 import org.apache.hadoop.yarn.api.records._
 import org.apache.hadoop.yarn.api.protocolrecords._
@@ -29,7 +31,7 @@ import org.apache.hadoop.yarn.conf.YarnConfiguration
 import org.apache.hadoop.yarn.ipc.YarnRPC
 import org.apache.hadoop.yarn.util.{ConverterUtils, Records}
 import scala.collection.JavaConversions._
-import org.apache.spark.{SparkContext, Logging}
+import org.apache.spark.{SparkContext, Logging, SecurityManager}
 import org.apache.spark.util.Utils
 import org.apache.hadoop.security.UserGroupInformation
 import java.security.PrivilegedExceptionAction
@@ -53,7 +55,16 @@ class ApplicationMaster(args: ApplicationMasterArguments, conf: Configuration) e
     // setup the directories so things go to yarn approved directories rather
     // then user specified and /tmp
     System.setProperty("spark.local.dir", getLocalDirs())
+
+    // set the web ui port to be ephemeral for yarn so we don't conflict with
+    // other spark processes running on the same box
+    System.setProperty("spark.ui.port", "0")
     
+    // generate secret key to be distributed to all the workers
+    if (SecurityManager.isAuthenticationEnabled) {
+      generateSecret()
+    }
+
     appAttemptId = getApplicationAttemptId()
     resourceManager = registerWithResourceManager()
 
@@ -76,6 +87,9 @@ class ApplicationMaster(args: ApplicationMasterArguments, conf: Configuration) e
     //  }
     //}
     // org.apache.hadoop.io.compress.CompressionCodecFactory.getCodecClasses(conf)
+
+    // setup AmIpFilter for the SparkUI - do this before we start the UI
+    addAmIpFilter()
     
     ApplicationMaster.register(this)
     // Start the user's JAR
@@ -99,6 +113,19 @@ class ApplicationMaster(args: ApplicationMasterArguments, conf: Configuration) e
     System.exit(0)
   }
 
+  // add the yarn amIpFilter that Yarn requires for properly securing the UI
+  private def addAmIpFilter() {
+    val amFilter = "org.apache.hadoop.yarn.server.webproxy.amfilter.AmIpFilter"
+    System.setProperty("spark.ui.filters", amFilter)
+    val proxy = YarnConfiguration.getProxyHostAndPort(conf)
+    val parts : Array[String] = proxy.split(":")
+    val uriBase = "http://" + proxy +
+      System.getenv(ApplicationConstants.APPLICATION_WEB_PROXY_BASE_ENV)
+
+    val params = "PROXY_HOST=" + parts(0) + "," + "PROXY_URI_BASE=" + uriBase
+    System.setProperty("org.apache.hadoop.yarn.server.webproxy.amfilter.AmIpFilter.params", params)
+  }
+
   /** Get the Yarn approved local directories. */
   private def getLocalDirs(): String = {
     // Hadoop 0.23 and 2.x have different Environment variable names for the
@@ -113,7 +140,16 @@ class ApplicationMaster(args: ApplicationMasterArguments, conf: Configuration) e
     }
     return localDirs
   }
-  
+
+  private def generateSecret() {
+    val sCookie = akka.util.Crypt.generateSecureCookie
+
+    // add to Hadoop credentials
+    val creds = new Credentials()
+    creds.addSecretKey(new Text("akkaCookie"), sCookie.getBytes());
+    UserGroupInformation.getCurrentUser().addCredentials(creds)
+  }
+
   private def getApplicationAttemptId(): ApplicationAttemptId = {
     val envs = System.getenv()
     val containerIdString = envs.get(ApplicationConstants.AM_CONTAINER_ID_ENV)

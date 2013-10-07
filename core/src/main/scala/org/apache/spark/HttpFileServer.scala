@@ -39,6 +39,7 @@ private[spark] class HttpFileServer extends Logging {
     httpServer = new HttpServer(baseDir)
     httpServer.start()
     serverUri = httpServer.uri
+    logInfo("HTTP file server started at: " + serverUri)
   }
   
   def stop() {
