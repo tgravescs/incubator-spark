@@ -51,21 +51,19 @@ import org.apache.hadoop.mapreduce.lib.input.{FileInputFormat => NewFileInputFor
 
 import org.apache.mesos.MesosNativeLibrary
 
-import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.deploy.LocalSparkCluster
 import org.apache.spark.partial.{ApproximateEvaluator, PartialResult}
 import org.apache.spark.rdd._
 import org.apache.spark.scheduler._
-import org.apache.spark.scheduler.cluster.{StandaloneSchedulerBackend, SparkDeploySchedulerBackend,
-  ClusterScheduler}
-import org.apache.spark.scheduler.local.LocalScheduler
+import org.apache.spark.scheduler.cluster.{CoarseGrainedSchedulerBackend,
+  SparkDeploySchedulerBackend, ClusterScheduler, SimrSchedulerBackend}
 import org.apache.spark.scheduler.cluster.mesos.{CoarseMesosSchedulerBackend, MesosSchedulerBackend}
-import org.apache.spark.storage.{StorageUtils, BlockManagerSource}
-import org.apache.spark.ui.SparkUI
-import org.apache.spark.util.{ClosureCleaner, Utils, MetadataCleaner, TimeStampedHashMap}
+import org.apache.spark.scheduler.local.LocalScheduler
 import org.apache.spark.scheduler.StageInfo
-import org.apache.spark.storage.RDDInfo
-import org.apache.spark.storage.StorageStatus
+import org.apache.spark.storage.{BlockManagerSource, RDDInfo, StorageStatus, StorageUtils}
+import org.apache.spark.ui.SparkUI
+import org.apache.spark.util.{ClosureCleaner, MetadataCleaner, MetadataCleanerType,
+  TimeStampedHashMap, Utils}
 
 /**
  * Main entry point for Spark functionality. A SparkContext represents the connection to a Spark
@@ -119,9 +117,9 @@ class SparkContext(
 
   // Keeps track of all persisted RDDs
   private[spark] val persistentRdds = new TimeStampedHashMap[Int, RDD[_]]
-  private[spark] val metadataCleaner = new MetadataCleaner("SparkContext", this.cleanup)
+  private[spark] val metadataCleaner = new MetadataCleaner(MetadataCleanerType.SPARK_CONTEXT, this.cleanup)
 
-  // Initalize the Spark UI
+  // Initialize the Spark UI
   private[spark] val ui = new SparkUI(this)
   ui.bind()
 
@@ -156,9 +154,11 @@ class SparkContext(
     // Regular expression for simulating a Spark cluster of [N, cores, memory] locally
     val LOCAL_CLUSTER_REGEX = """local-cluster\[\s*([0-9]+)\s*,\s*([0-9]+)\s*,\s*([0-9]+)\s*]""".r
     // Regular expression for connecting to Spark deploy clusters
-    val SPARK_REGEX = """(spark://.*)""".r
-    //Regular expression for connection to Mesos cluster
-    val MESOS_REGEX = """(mesos://.*)""".r
+    val SPARK_REGEX = """spark://(.*)""".r
+    // Regular expression for connection to Mesos cluster
+    val MESOS_REGEX = """mesos://(.*)""".r
+    // Regular expression for connection to Simr cluster
+    val SIMR_REGEX = """simr://(.*)""".r
 
     master match {
       case "local" =>
@@ -172,7 +172,14 @@ class SparkContext(
 
       case SPARK_REGEX(sparkUrl) =>
         val scheduler = new ClusterScheduler(this)
-        val backend = new SparkDeploySchedulerBackend(scheduler, this, sparkUrl, appName)
+        val masterUrls = sparkUrl.split(",").map("spark://" + _)
+        val backend = new SparkDeploySchedulerBackend(scheduler, this, masterUrls, appName)
+        scheduler.initialize(backend)
+        scheduler
+
+      case SIMR_REGEX(simrUrl) =>
+        val scheduler = new ClusterScheduler(this)
+        val backend = new SimrSchedulerBackend(scheduler, this, simrUrl)
         scheduler.initialize(backend)
         scheduler
 
@@ -188,8 +195,8 @@ class SparkContext(
         val scheduler = new ClusterScheduler(this)
         val localCluster = new LocalSparkCluster(
           numSlaves.toInt, coresPerSlave.toInt, memoryPerSlaveInt)
-        val sparkUrl = localCluster.start()
-        val backend = new SparkDeploySchedulerBackend(scheduler, this, sparkUrl, appName)
+        val masterUrls = localCluster.start()
+        val backend = new SparkDeploySchedulerBackend(scheduler, this, masterUrls, appName)
         scheduler.initialize(backend)
         backend.shutdownCallback = (backend: SparkDeploySchedulerBackend) => {
           localCluster.stop()
@@ -208,30 +215,29 @@ class SparkContext(
             throw new SparkException("YARN mode not available ?", th)
           }
         }
-        val backend = new StandaloneSchedulerBackend(scheduler, this.env.actorSystem)
+        val backend = new CoarseGrainedSchedulerBackend(scheduler, this.env.actorSystem)
+        scheduler.initialize(backend)
+        scheduler
+
+      case MESOS_REGEX(mesosUrl) =>
+        MesosNativeLibrary.load()
+        val scheduler = new ClusterScheduler(this)
+        val coarseGrained = System.getProperty("spark.mesos.coarse", "false").toBoolean
+        val backend = if (coarseGrained) {
+          new CoarseMesosSchedulerBackend(scheduler, this, mesosUrl, appName)
+        } else {
+          new MesosSchedulerBackend(scheduler, this, mesosUrl, appName)
+        }
         scheduler.initialize(backend)
         scheduler
 
       case _ =>
-        if (MESOS_REGEX.findFirstIn(master).isEmpty) {
-          logWarning("Master %s does not match expected format, parsing as Mesos URL".format(master))
-        }
-        MesosNativeLibrary.load()
-        val scheduler = new ClusterScheduler(this)
-        val coarseGrained = System.getProperty("spark.mesos.coarse", "false").toBoolean
-        val masterWithoutProtocol = master.replaceFirst("^mesos://", "")  // Strip initial mesos://
-        val backend = if (coarseGrained) {
-          new CoarseMesosSchedulerBackend(scheduler, this, masterWithoutProtocol, appName)
-        } else {
-          new MesosSchedulerBackend(scheduler, this, masterWithoutProtocol, appName)
-        }
-        scheduler.initialize(backend)
-        scheduler
+        throw new SparkException("Could not parse Master URL: '" + master + "'")
     }
   }
   taskScheduler.start()
 
-  @volatile private var dagScheduler = new DAGScheduler(taskScheduler)
+  @volatile private[spark] var dagScheduler = new DAGScheduler(taskScheduler)
   dagScheduler.start()
 
   ui.start()
@@ -283,15 +289,46 @@ class SparkContext(
     Option(localProperties.get).map(_.getProperty(key)).getOrElse(null)
 
   /** Set a human readable description of the current job. */
+  @deprecated("use setJobGroup", "0.8.1")
   def setJobDescription(value: String) {
-    setLocalProperty(SparkContext.SPARK_JOB_DESCRIPTION, value)
+    setJobGroup("", value)
+  }
+
+  /**
+   * Assigns a group id to all the jobs started by this thread until the group id is set to a
+   * different value or cleared.
+   *
+   * Often, a unit of execution in an application consists of multiple Spark actions or jobs.
+   * Application programmers can use this method to group all those jobs together and give a
+   * group description. Once set, the Spark web UI will associate such jobs with this group.
+   *
+   * The application can also use [[org.apache.spark.SparkContext.cancelJobGroup]] to cancel all
+   * running jobs in this group. For example,
+   * {{{
+   * // In the main thread:
+   * sc.setJobGroup("some_job_to_cancel", "some job description")
+   * sc.parallelize(1 to 10000, 2).map { i => Thread.sleep(10); i }.count()
+   *
+   * // In a separate thread:
+   * sc.cancelJobGroup("some_job_to_cancel")
+   * }}}
+   */
+  def setJobGroup(groupId: String, description: String) {
+    setLocalProperty(SparkContext.SPARK_JOB_DESCRIPTION, description)
+    setLocalProperty(SparkContext.SPARK_JOB_GROUP_ID, groupId)
+  }
+
+  /** Clear the job group id and its description. */
+  def clearJobGroup() {
+    setLocalProperty(SparkContext.SPARK_JOB_DESCRIPTION, null)
+    setLocalProperty(SparkContext.SPARK_JOB_GROUP_ID, null)
   }
 
   // Post init
   taskScheduler.postStartHook()
 
-  val dagSchedulerSource = new DAGSchedulerSource(this.dagScheduler, this)
-  val blockManagerSource = new BlockManagerSource(SparkEnv.get.blockManager, this)
+  private val dagSchedulerSource = new DAGSchedulerSource(this.dagScheduler, this)
+  private val blockManagerSource = new BlockManagerSource(SparkEnv.get.blockManager, this)
 
   def initDriverMetrics() {
     SparkEnv.get.metricsSystem.registerSource(dagSchedulerSource)
@@ -330,7 +367,7 @@ class SparkContext(
   }
 
   /**
-   * Get an RDD for a Hadoop-readable dataset from a Hadoop JobConf giving its InputFormat and any
+   * Get an RDD for a Hadoop-readable dataset from a Hadoop JobConf given its InputFormat and any
    * other necessary info (e.g. file name for a filesystem-based dataset, table name for HyperTable,
    * etc).
    */
@@ -356,24 +393,15 @@ class SparkContext(
       ): RDD[(K, V)] = {
     // A Hadoop configuration can be about 10 KB, which is pretty big, so broadcast it.
     val confBroadcast = broadcast(new SerializableWritable(hadoopConfiguration))
-    hadoopFile(path, confBroadcast, inputFormatClass, keyClass, valueClass, minSplits)
-  }
-
-  /**
-   * Get an RDD for a Hadoop file with an arbitray InputFormat. Accept a Hadoop Configuration
-   * that has already been broadcast, assuming that it's safe to use it to construct a
-   * HadoopFileRDD (i.e., except for file 'path', all other configuration properties can be resued).
-   */
-  def hadoopFile[K, V](
-      path: String,
-      confBroadcast: Broadcast[SerializableWritable[Configuration]],
-      inputFormatClass: Class[_ <: InputFormat[K, V]],
-      keyClass: Class[K],
-      valueClass: Class[V],
-      minSplits: Int
-      ): RDD[(K, V)] = {
-    new HadoopFileRDD(
-      this, path, confBroadcast, inputFormatClass, keyClass, valueClass, minSplits)
+    val setInputPathsFunc = (jobConf: JobConf) => FileInputFormat.setInputPaths(jobConf, path)
+    new HadoopRDD(
+      this,
+      confBroadcast,
+      Some(setInputPathsFunc),
+      inputFormatClass,
+      keyClass,
+      valueClass,
+      minSplits)
   }
 
   /**
@@ -659,8 +687,7 @@ class SparkContext(
    */
   def addJar(path: String) {
     if (path == null) {
-      logWarning("null specified as parameter to addJar",
-        new SparkException("null specified as parameter to addJar"))
+      logWarning("null specified as parameter to addJar")
     } else {
       var key = ""
       if (path.contains("\\")) {
@@ -671,10 +698,21 @@ class SparkContext(
         key = uri.getScheme match {
           case null | "file" =>
             if (env.hadoop.isYarnMode()) {
-              logWarning("local jar specified as parameter to addJar under Yarn mode")
-              return
+              // In order for this to work on yarn the user must specify the --addjars option to
+              // the client to upload the file into the distributed cache to make it show up in the
+              // current working directory.
+              val fileName = new Path(uri.getPath).getName()
+              try {
+                env.httpFileServer.addJar(new File(fileName))
+              } catch {
+                case e: Exception => {
+                  logError("Error adding jar (" + e + "), was the --addJars option used?")
+                  throw e
+                }
+              }
+            } else {
+              env.httpFileServer.addJar(new File(uri.getPath))
             }
-            env.httpFileServer.addJar(new File(uri.getPath))
           case _ =>
             path
         }
@@ -748,10 +786,11 @@ class SparkContext(
       allowLocal: Boolean,
       resultHandler: (Int, U) => Unit) {
     val callSite = Utils.formatSparkCallSite
+    val cleanedFunc = clean(func)
     logInfo("Starting job: " + callSite)
     val start = System.nanoTime
-    val result = dagScheduler.runJob(rdd, func, partitions, callSite, allowLocal, resultHandler,
-      localProperties.get)
+    val result = dagScheduler.runJob(rdd, cleanedFunc, partitions, callSite, allowLocal,
+      resultHandler, localProperties.get)
     logInfo("Job finished: " + callSite + ", took " + (System.nanoTime - start) / 1e9 + " s")
     rdd.doCheckpoint()
     result
@@ -841,6 +880,42 @@ class SparkContext(
   }
 
   /**
+   * Submit a job for execution and return a FutureJob holding the result.
+   */
+  def submitJob[T, U, R](
+      rdd: RDD[T],
+      processPartition: Iterator[T] => U,
+      partitions: Seq[Int],
+      resultHandler: (Int, U) => Unit,
+      resultFunc: => R): SimpleFutureAction[R] =
+  {
+    val cleanF = clean(processPartition)
+    val callSite = Utils.formatSparkCallSite
+    val waiter = dagScheduler.submitJob(
+      rdd,
+      (context: TaskContext, iter: Iterator[T]) => cleanF(iter),
+      partitions,
+      callSite,
+      allowLocal = false,
+      resultHandler,
+      localProperties.get)
+    new SimpleFutureAction(waiter, resultFunc)
+  }
+
+  /**
+   * Cancel active jobs for the specified group. See [[org.apache.spark.SparkContext.setJobGroup]]
+   * for more information.
+   */
+  def cancelJobGroup(groupId: String) {
+    dagScheduler.cancelJobGroup(groupId)
+  }
+
+  /** Cancel all jobs that have been scheduled or are running.  */
+  def cancelAllJobs() {
+    dagScheduler.cancelAllJobs()
+  }
+
+  /**
    * Clean a closure to make it ready to serialized and send to tasks
    * (removes unreferenced variables in $outer's, updates REPL variables)
    */
@@ -896,7 +971,10 @@ class SparkContext(
  * various Spark features.
  */
 object SparkContext {
-  val SPARK_JOB_DESCRIPTION = "spark.job.description"
+
+  private[spark] val SPARK_JOB_DESCRIPTION = "spark.job.description"
+
+  private[spark] val SPARK_JOB_GROUP_ID = "spark.jobGroup.id"
 
   implicit object DoubleAccumulatorParam extends AccumulatorParam[Double] {
     def addInPlace(t1: Double, t2: Double): Double = t1 + t2
@@ -922,6 +1000,8 @@ object SparkContext {
 
   implicit def rddToPairRDDFunctions[K: ClassManifest, V: ClassManifest](rdd: RDD[(K, V)]) =
     new PairRDDFunctions(rdd)
+
+  implicit def rddToAsyncRDDActions[T: ClassManifest](rdd: RDD[T]) = new AsyncRDDActions(rdd)
 
   implicit def rddToSequenceFileRDDFunctions[K <% Writable: ClassManifest, V <% Writable: ClassManifest](
       rdd: RDD[(K, V)]) =
