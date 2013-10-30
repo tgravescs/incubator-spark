@@ -22,6 +22,8 @@ import org.apache.hadoop.io.Text
 import org.apache.hadoop.security.Credentials
 import org.apache.hadoop.security.UserGroupInformation
 
+import org.apache.spark.deploy.SparkHadoopUtil
+
 /** 
  * Spark class responsible for security.  
  */
@@ -76,29 +78,33 @@ private object SecurityManager extends Logging {
    */
   def getSecretKey() : String = {
     if (authOn) {
-      if (java.lang.Boolean.valueOf(System.getProperty("SPARK_YARN_MODE", System.getenv("SPARK_YARN_MODE")))) {
-        val credentials = UserGroupInformation.getCurrentUser().getCredentials()
-        val secretKey = credentials.getSecretKey(new Text("akkaCookie"))
-        if (secretKey != null) {
-          logDebug("in yarn mode")
-          return new Text(secretKey).toString
+      if (SparkHadoopUtil.get.isYarnMode) {
+        val credentials = SparkHadoopUtil.get.getCurrentUserCredentials()
+        if (credentials != null) { 
+          val secretKey = credentials.getSecretKey(new Text("akkaCookie"))
+          if (secretKey != null) {
+            logDebug("in yarn mode")
+            return new Text(secretKey).toString
+          } else {
+            logDebug("getSecretKey: yarn mode, secret key is null")
+          }
         } else {
-          logDebug("in yarn mode, secret key is null")
+          logDebug("getSecretKey: yarn mode, credentials are null")
         }
         return null
       } else {
         // java property used for testing - env variable should be used normally
         val secret = System.getProperty("SPARK_SECRET", System.getenv("SPARK_SECRET")) 
         if (secret != null && !secret.isEmpty()) {
-          logDebug("in getSecretKey")
+          logDebug("getSecretKey: secret is set")
           return secret
         } else {
-          logDebug("in getSecretKey , secret key is null")
+          logDebug("getSecretKey: secret key is null")
         }
         return null
       }
     } else {
-      logDebug("auth off")
+      logDebug("getSecretKey: auth off")
     }
     return null
   }

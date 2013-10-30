@@ -254,7 +254,12 @@ private[spark] object Utils extends Logging {
 
         var uc : URLConnection = null
         if (SecurityManager.isAuthenticationEnabled()) {
-          val userInfo = SecurityManager.getHttpUser()  + ":" + SecurityManager.getSecretKey()
+
+          val userCred = SecurityManager.getSecretKey()
+          if (userCred == null) {
+            throw new Exception("secret key is null with authentication on")
+          }
+          val userInfo = SecurityManager.getHttpUser()  + ":" + userCred
           val newuri = new URI(uri.getScheme(), userInfo, uri.getHost(), uri.getPort(), uri.getPath(),
                                uri.getQuery(), uri.getFragment())
 
@@ -314,9 +319,8 @@ private[spark] object Utils extends Logging {
         }
       case _ =>
         // Use the Hadoop filesystem library, which supports file://, hdfs://, s3://, and others
-        val env = SparkEnv.get
         val uri = new URI(url)
-        val conf = env.hadoop.newConfiguration()
+        val conf = SparkHadoopUtil.get.newConfiguration()
         val fs = FileSystem.get(uri, conf)
         val in = fs.open(new Path(uri))
         val out = new FileOutputStream(tempFile)

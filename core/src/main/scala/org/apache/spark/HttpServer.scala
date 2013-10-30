@@ -82,6 +82,9 @@ private[spark] class HttpServer(resourceBase: File) extends Logging {
         val hashLogin = new HashLoginService()
 
         val userCred = new Password(SecurityManager.getSecretKey())
+        if (userCred == null) {
+          throw new Exception("secret key is null with authentication on")
+        }
         hashLogin.putUser(SecurityManager.getHttpUser(), userCred, Array("user"))
 
         logDebug("hashlogin loading user: " + hashLogin.getUsers())
