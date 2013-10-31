@@ -21,8 +21,6 @@ import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.mapred.JobConf
 import org.apache.hadoop.security.Credentials
 
-import com.google.common.collect.MapMaker
-
 import org.apache.spark.SparkException
 
 /**
