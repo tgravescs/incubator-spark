@@ -37,7 +37,6 @@ import scala.collection.mutable.Map
 
 /** Client side methods to setup the Hadoop distributed cache */
 class ClientDistributedCacheManager() extends Logging {
-  private val statCache: Map[URI, FileStatus] = HashMap[URI, FileStatus]()
   private var distFiles = None: Option[String]
   private var distFilesTimeStamps = None: Option[String]
   private var distFilesFileSizes = None: Option[String]
@@ -69,11 +68,12 @@ class ClientDistributedCacheManager() extends Logging {
       localResources: HashMap[String, LocalResource],
       resourceType: LocalResourceType,
       link: String,
+      statCache: Map[URI, FileStatus],
       appMasterOnly: Boolean = false) = {
     val destStatus = fs.getFileStatus(destPath)
     val amJarRsrc = Records.newRecord(classOf[LocalResource]).asInstanceOf[LocalResource]
     amJarRsrc.setType(resourceType)
-    val visibility = getVisibility(conf, destPath.toUri())
+    val visibility = getVisibility(conf, destPath.toUri(), statCache)
     amJarRsrc.setVisibility(visibility)
     amJarRsrc.setResource(ConverterUtils.getYarnUrlFromPath(destPath))
     amJarRsrc.setTimestamp(destStatus.getModificationTime())
@@ -171,8 +171,8 @@ class ClientDistributedCacheManager() extends Logging {
    * @param statCache
    * @return LocalResourceVisibility
    */
-  def getVisibility(conf: Configuration, uri: URI): LocalResourceVisibility = {
-    logInfo("statcache contains " + statCache.map(_ + ","))
+  def getVisibility(conf: Configuration, uri: URI, statCache: Map[URI, FileStatus]):
+      LocalResourceVisibility = {
     if (isPublic(conf, uri, statCache)) {
       return LocalResourceVisibility.PUBLIC 
     } 

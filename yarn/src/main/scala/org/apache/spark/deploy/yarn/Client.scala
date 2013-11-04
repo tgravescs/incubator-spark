@@ -214,6 +214,8 @@ class Client(conf: Configuration, args: ClientArguments) extends YarnClientImpl 
     val localResources = HashMap[String, LocalResource]()
     FileSystem.mkdirs(fs, dst, new FsPermission(STAGING_DIR_PERMISSION))
 
+    val statCache: Map[URI, FileStatus] = HashMap[URI, FileStatus]()
+
     Map(Client.SPARK_JAR -> System.getenv("SPARK_JAR"), Client.APP_JAR -> args.userJar, 
       Client.LOG4J_PROP -> System.getenv("SPARK_LOG4J_CONF"))
     .foreach { case(destName, _localPath) =>
@@ -226,7 +228,8 @@ class Client(conf: Configuration, args: ClientArguments) extends YarnClientImpl 
         }
         val setPermissions = if (destName.equals(Client.APP_JAR)) true else false
         val destPath = copyRemoteFile(dst, new Path(localURI), replication, setPermissions)
-        distCacheMgr.addResource(fs, conf, destPath, localResources, LocalResourceType.FILE, destName)
+        distCacheMgr.addResource(fs, conf, destPath, localResources, LocalResourceType.FILE, 
+          destName, statCache)
       }
     }
 
@@ -238,7 +241,7 @@ class Client(conf: Configuration, args: ClientArguments) extends YarnClientImpl 
         val linkname = Option(localURI.getFragment()).getOrElse(localPath.getName())
         val destPath = copyRemoteFile(dst, localPath, replication)
         distCacheMgr.addResource(fs, conf, destPath, localResources, LocalResourceType.FILE, 
-          linkname, true)
+          linkname, statCache, true)
       }
     }
 
@@ -250,7 +253,7 @@ class Client(conf: Configuration, args: ClientArguments) extends YarnClientImpl 
         val linkname = Option(localURI.getFragment()).getOrElse(localPath.getName())
         val destPath = copyRemoteFile(dst, localPath, replication)
         distCacheMgr.addResource(fs, conf, destPath, localResources, LocalResourceType.FILE, 
-          linkname)
+          linkname, statCache)
       }
     }
 
@@ -262,7 +265,7 @@ class Client(conf: Configuration, args: ClientArguments) extends YarnClientImpl 
         val linkname = Option(localURI.getFragment()).getOrElse(localPath.getName())
         val destPath = copyRemoteFile(dst, localPath, replication)
         distCacheMgr.addResource(fs, conf, destPath, localResources, LocalResourceType.ARCHIVE, 
-          linkname)
+          linkname, statCache)
       }
     }
 
