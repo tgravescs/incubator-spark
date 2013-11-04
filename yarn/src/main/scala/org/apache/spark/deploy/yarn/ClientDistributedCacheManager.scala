@@ -59,6 +59,7 @@ class ClientDistributedCacheManager() extends Logging {
    * @param localResources localResource hashMap to insert the resource into
    * @param resourceType LocalResourceType 
    * @param link link presented in the distributed cache to the destination
+   * @param statCache cache to store the file/directory stats 
    * @param appMasterOnly Whether to only add the resource to the app master
    */
   def addResource(
