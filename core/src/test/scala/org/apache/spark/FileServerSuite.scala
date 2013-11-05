@@ -36,7 +36,7 @@ class FileServerSuite extends FunSuite with LocalSparkContext {
     val pw = new PrintWriter(tmpFile)
     pw.println("100")
     pw.close()
-    SecurityManager.setAuthenticationOn(false)
+    System.setProperty("spark.authenticate", "false")
   }
 
   override def afterEach() {
@@ -62,7 +62,7 @@ class FileServerSuite extends FunSuite with LocalSparkContext {
   }
 
   test("Distributing files locally security On") {
-    SecurityManager.setAuthenticationOn(true)
+    System.setProperty("spark.authenticate", "true")
     System.setProperty("SPARK_SECRET", "good")
 
     sc = new SparkContext("local[4]", "test")

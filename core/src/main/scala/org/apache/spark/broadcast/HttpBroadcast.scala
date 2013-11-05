@@ -148,8 +148,8 @@ private object HttpBroadcast extends Logging {
         throw new Exception("secret key is null with authentication on")
       }
       val userInfo = SecurityManager.getHttpUser()  + ":" + userCred
-      val newuri = new URI(uri.getScheme(), userInfo, uri.getHost(), uri.getPort(), uri.getPath(), 
-                           uri.getQuery(), uri.getFragment())
+      val newuri = new URI(uri.getScheme(), userInfo, uri.getHost(), uri.getPort(), uri.getPath(),
+        uri.getQuery(), uri.getFragment())
 
       uc = newuri.toURL().openConnection()
       uc.setAllowUserInteraction(false)
@@ -157,13 +157,13 @@ private object HttpBroadcast extends Logging {
 
       // set our own authenticator to properly negotiate user/password
       Authenticator.setDefault(
-        new Authenticator(){
+        new Authenticator() {
           override def getPasswordAuthentication(): PasswordAuthentication = {
-            var passAuth : PasswordAuthentication = null
+            var passAuth: PasswordAuthentication = null
             val userInfo = getRequestingURL().getUserInfo()
             if (userInfo != null) {
               val  parts = userInfo.split(":", 2)
-             passAuth = new PasswordAuthentication(parts(0), parts(1).toCharArray())
+              passAuth = new PasswordAuthentication(parts(0), parts(1).toCharArray())
             }
             return passAuth
           }  

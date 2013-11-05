@@ -253,27 +253,24 @@ private[spark] object Utils extends Logging {
       case "http" | "https" | "ftp" =>
         logInfo("Fetching " + url + " to " + tempFile)
 
-        var uc : URLConnection = null
+        var uc: URLConnection = null
         if (SecurityManager.isAuthenticationEnabled()) {
-
           val userCred = SecurityManager.getSecretKey()
           if (userCred == null) {
             throw new Exception("secret key is null with authentication on")
           }
           val userInfo = SecurityManager.getHttpUser()  + ":" + userCred
-          val newuri = new URI(uri.getScheme(), userInfo, uri.getHost(), uri.getPort(), uri.getPath(),
-                               uri.getQuery(), uri.getFragment())
-
+          val newuri = new URI(uri.getScheme(), userInfo, uri.getHost(), uri.getPort(), 
+            uri.getPath(), uri.getQuery(), uri.getFragment())
           uc = newuri.toURL().openConnection()
-
           uc.setAllowUserInteraction(false)
           logDebug("in security enabled")
 
           // set our own authenticator to properly negotiate user/password
           Authenticator.setDefault(
-            new Authenticator(){
+            new Authenticator() {
               override def getPasswordAuthentication(): PasswordAuthentication = {
-                var passAuth : PasswordAuthentication = null
+                var passAuth: PasswordAuthentication = null
                 val userInfo = getRequestingURL().getUserInfo()
                 if (userInfo != null) {
                   val  parts = userInfo.split(":", 2)

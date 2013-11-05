@@ -30,7 +30,7 @@ import org.apache.spark.util.AkkaUtils
 class AkkaUtilsSuite extends FunSuite with LocalSparkContext {
 
   test("remote fetch security bad password") {
-    SecurityManager.setAuthenticationOn(true)
+    System.setProperty("spark.authenticate", "true")
     System.setProperty("SPARK_SECRET", "good")
 
     val hostname = "localhost"
@@ -44,7 +44,7 @@ class AkkaUtilsSuite extends FunSuite with LocalSparkContext {
     masterTracker.trackerActor = actorSystem.actorOf(
         Props(new MapOutputTrackerMasterActor(masterTracker)), "MapOutputTracker")
 
-    SecurityManager.setAuthenticationOn(true)
+    System.setProperty("spark.authenticate", "true")
     System.setProperty("SPARK_SECRET", "bad")
 
     val (slaveSystem, _) = AkkaUtils.createActorSystem("spark-slave", hostname, 0)
@@ -73,7 +73,7 @@ class AkkaUtilsSuite extends FunSuite with LocalSparkContext {
   }
 
   test("remote fetch security off") {
-    SecurityManager.setAuthenticationOn(false)
+    System.setProperty("spark.authenticate", "false")
     System.setProperty("SPARK_SECRET", "bad")
 
     val hostname = "localhost"
@@ -87,7 +87,7 @@ class AkkaUtilsSuite extends FunSuite with LocalSparkContext {
     masterTracker.trackerActor = actorSystem.actorOf(
         Props(new MapOutputTrackerMasterActor(masterTracker)), "MapOutputTracker")
 
-    SecurityManager.setAuthenticationOn(false)
+    System.setProperty("spark.authenticate", "false")
     System.setProperty("SPARK_SECRET", "good")
 
     val (slaveSystem, _) = AkkaUtils.createActorSystem("spark-slave", hostname, 0)
@@ -116,7 +116,7 @@ class AkkaUtilsSuite extends FunSuite with LocalSparkContext {
   }
 
   test("remote fetch security pass") {
-    SecurityManager.setAuthenticationOn(true)
+    System.setProperty("spark.authenticate", "true")
     System.setProperty("SPARK_SECRET", "good")
 
     val hostname = "localhost"
@@ -130,7 +130,7 @@ class AkkaUtilsSuite extends FunSuite with LocalSparkContext {
     masterTracker.trackerActor = actorSystem.actorOf(
         Props(new MapOutputTrackerMasterActor(masterTracker)), "MapOutputTracker")
 
-    SecurityManager.setAuthenticationOn(true)
+    System.setProperty("spark.authenticate", "true")
     System.setProperty("SPARK_SECRET", "good")
 
     assert(SecurityManager.isAuthenticationEnabled() === true)
@@ -160,7 +160,7 @@ class AkkaUtilsSuite extends FunSuite with LocalSparkContext {
   }
 
   test("remote fetch security off client") {
-    SecurityManager.setAuthenticationOn(true)
+    System.setProperty("spark.authenticate", "true")
     System.setProperty("SPARK_SECRET", "good")
 
     val hostname = "localhost"
@@ -174,7 +174,7 @@ class AkkaUtilsSuite extends FunSuite with LocalSparkContext {
     masterTracker.trackerActor = actorSystem.actorOf(
         Props(new MapOutputTrackerMasterActor(masterTracker)), "MapOutputTracker")
 
-    SecurityManager.setAuthenticationOn(false)
+    System.setProperty("spark.authenticate", "false")
     System.setProperty("SPARK_SECRET", "bad")
 
     val (slaveSystem, _) = AkkaUtils.createActorSystem("spark-slave", hostname, 0)

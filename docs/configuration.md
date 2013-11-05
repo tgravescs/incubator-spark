@@ -338,7 +338,7 @@ Apart from these, the following properties are also available, and may be useful
   </td>
 </tr>
 <tr>
-  <td>spark.ui.authenticate</td>
+  <td>spark.authenticate.ui</td>
   <td>false</td>
   <td>
     Whether spark web ui authentication should be on. If enabled this checks the user access
