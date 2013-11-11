@@ -222,6 +222,7 @@ object SparkBuild extends Build {
       "net.liftweb" % "lift-json_2.9.2" % "2.5",
       "org.apache.mesos" % "mesos" % "0.13.0",
       "io.netty" % "netty-all" % "4.0.0.Beta2",
+      "commons-net" % "commons-net" % "2.2",
       "org.apache.derby" % "derby" % "10.4.2.0" % "test",
       "org.apache.hadoop" % "hadoop-client" % hadoopVersion excludeAll(excludeJackson, excludeNetty, excludeAsm, excludeCglib),
       "net.java.dev.jets3t" % "jets3t" % "0.7.1",

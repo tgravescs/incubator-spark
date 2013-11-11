@@ -18,6 +18,8 @@
 package org.apache.spark.network
 
 import org.apache.spark._
+import org.apache.spark.SparkSaslServer
+import org.apache.spark.SparkSaslServer.SaslDigestCallbackHandler
 
 import scala.collection.mutable.{HashMap, Queue, ArrayBuffer}
 
@@ -26,17 +28,25 @@ import java.nio._
 import java.nio.channels._
 import java.nio.channels.spi._
 import java.net._
+import java.util.concurrent.atomic.AtomicBoolean
 
 
 private[spark]
 abstract class Connection(val channel: SocketChannel, val selector: Selector,
-    val socketRemoteConnectionManagerId: ConnectionManagerId)
+    val socketRemoteConnectionManagerId: ConnectionManagerId, val connectionId: ConnectionId)
   extends Logging {
 
-  def this(channel_ : SocketChannel, selector_ : Selector) = {
+  val authEnabled = SecurityManager.isAuthenticationEnabled()
+  // if security off default established to true
+  var saslContextEstablished : AtomicBoolean = if (authEnabled) 
+    new AtomicBoolean(false) else new AtomicBoolean(true)
+  var sparkSaslServer : SparkSaslServer = null
+  var sparkSaslClient : SparkSaslClient = null
+
+  def this(channel_ : SocketChannel, selector_ : Selector, id_ : ConnectionId) = {
     this(channel_, selector_,
       ConnectionManagerId.fromSocketAddress(
-        channel_.socket.getRemoteSocketAddress().asInstanceOf[InetSocketAddress]))
+        channel_.socket.getRemoteSocketAddress().asInstanceOf[InetSocketAddress]), id_)
   }
 
   channel.configureBlocking(false)
@@ -53,6 +63,7 @@ abstract class Connection(val channel: SocketChannel, val selector: Selector,
   val remoteAddress = getRemoteAddress()
 
   def resetForceReregister(): Boolean
+  def resetForceReregisterSecurity(): Boolean
 
   // Read channels typically do not register for write and write does not for read
   // Now, we do have write registering for read too (temporarily), but this is to detect
@@ -71,6 +82,15 @@ abstract class Connection(val channel: SocketChannel, val selector: Selector,
   // On receiving a read event, should we change the interest for this channel or not ?
   // Will be true for ReceivingConnection, false for SendingConnection.
   def changeInterestForRead(): Boolean
+
+  private def disposeSasl() {
+    if (sparkSaslServer != null) {
+      sparkSaslServer.dispose();
+    }
+    if (sparkSaslClient != null) {
+      sparkSaslClient.dispose()
+    }
+  }
 
   // On receiving a write event, should we change the interest for this channel or not ?
   // Will be false for ReceivingConnection, true for SendingConnection.
@@ -104,6 +124,7 @@ abstract class Connection(val channel: SocketChannel, val selector: Selector,
       k.cancel()
     }
     channel.close()
+    disposeSasl()
     callOnCloseCallback()
   }
 
@@ -171,13 +192,18 @@ abstract class Connection(val channel: SocketChannel, val selector: Selector,
 
 private[spark]
 class SendingConnection(val address: InetSocketAddress, selector_ : Selector,
-    remoteId_ : ConnectionManagerId)
-  extends Connection(SocketChannel.open, selector_, remoteId_) {
+    remoteId_ : ConnectionManagerId, id_ : ConnectionId)
+  extends Connection(SocketChannel.open, selector_, remoteId_, id_) {
 
   private class Outbox(fair: Int = 0) {
     val messages = new Queue[Message]()
     val defaultChunkSize = 65536  //32768 //16384
     var nextMessageToBeUsed = 0
+
+    // should be called while synchronized 
+    def isEmpty() : Boolean = {
+      return messages.isEmpty
+    }
 
     def addMessage(message: Message) {
       messages.synchronized{
@@ -251,6 +277,11 @@ class SendingConnection(val address: InetSocketAddress, selector_ : Selector,
     }
   }
 
+  // keep track of which outBox we send from in case some left to send next iteration
+  // used when Authentication is on
+  private var sendBox : Outbox = null
+  private val outboxSecurity = new Outbox(1)
+
   // outbox is used as a lock - ensure that it is always used as a leaf (since methods which 
   // lock it are invoked in context of other locks)
   private val outbox = new Outbox(1)
@@ -261,7 +292,11 @@ class SendingConnection(val address: InetSocketAddress, selector_ : Selector,
     This can happen due to a race between adding pending buffers, and checking for existing of 
     data as detailed in https://github.com/mesos/spark/pull/791
    */
+  private var currentNeedForceReregister = false
   private var needForceReregister = false
+  private var needForceReregisterSecurity = false
+
+  private var currentForceReregisterFunc = resetForceReregister _;
   val currentBuffers = new ArrayBuffer[ByteBuffer]()
 
   /*channel.socket.setSendBufferSize(256 * 1024)*/
@@ -280,6 +315,32 @@ class SendingConnection(val address: InetSocketAddress, selector_ : Selector,
     changeConnectionKeyInterest(DEFAULT_INTEREST)
   }
 
+  // Check to see if we have messages in the outbox that we need to register interest for. 
+  // This could be called after authentication for instance.
+  def checkRegister() : Boolean = {
+    outboxSecurity.synchronized {
+      if ((!outboxSecurity.isEmpty) && (channel.isConnected)) {
+        return true
+      }
+    }
+    outbox.synchronized {
+      if ((!outbox.isEmpty) && (channel.isConnected) && (saslContextEstablished.get() == true)) { 
+        return true
+      }
+    }
+    return false
+  }
+
+  def sendSecurity(message: Message) {
+    outboxSecurity.synchronized {
+      outboxSecurity.addMessage(message)
+      needForceReregisterSecurity = true
+    }
+    if (channel.isConnected) {
+        registerInterest()
+    }
+  }
+
   def send(message: Message) {
     outbox.synchronized {
       outbox.addMessage(message)
@@ -295,6 +356,15 @@ class SendingConnection(val address: InetSocketAddress, selector_ : Selector,
     outbox.synchronized {
       val result = needForceReregister
       needForceReregister = false
+      result
+    }
+  }
+
+  // return previous value after resetting it.
+  def resetForceReregisterSecurity(): Boolean = {
+    outboxSecurity.synchronized {
+      val result = needForceReregisterSecurity
+      needForceReregisterSecurity = false
       result
     }
   }
@@ -342,16 +412,66 @@ class SendingConnection(val address: InetSocketAddress, selector_ : Selector,
   }
 
   override def write(): Boolean = {
+    if (authEnabled) {
+      return writeSasl()
+    } else {
+      return writeInternal(outbox, needForceReregister, resetForceReregister)
+    }
+  }
+
+
+  // this is a bit complex due to us having 2 outboxs when security is enabled
+  // one is for security messages because in cases the normal messages shouldn't
+  // be sent until security negotiation has finished. 
+  private def writeSasl(): Boolean = {
+    var resp = false
+
+    // we need to check currentBuffers to see if it has data left 
+    // make sure to send from that outbox first to finish that send
+    if (currentBuffers.size > 0) {
+      logDebug("sending leftover messages")
+      resp = writeInternal(sendBox, currentNeedForceReregister, currentForceReregisterFunc)
+      if (resp) {
+        return resp
+      }
+    }
+
+    // send any messages in security outbox
+    sendBox = outboxSecurity
+    currentForceReregisterFunc = resetForceReregisterSecurity _
+    currentNeedForceReregister = needForceReregisterSecurity
+    logDebug("sending security messages")
+    resp = writeInternal(sendBox, currentNeedForceReregister, currentForceReregisterFunc)
+    if (resp) return resp
+
+    // only send messages in outbox if auth negotiated for this connection
+    // or authentication is off
+    if (saslContextEstablished.get() == true) {
+      logDebug("sending normal message")
+      sendBox = outbox
+      currentForceReregisterFunc = resetForceReregister _
+      currentNeedForceReregister = needForceReregister
+      resp = writeInternal(sendBox, currentNeedForceReregister, currentForceReregisterFunc)
+    } else {
+      logDebug("sasl context not established")
+    }
+
+    return resp
+  }
+
+  private def writeInternal(sendbox: Outbox, needReregister: Boolean, 
+      resetReregister: () => Boolean): Boolean = {
     try {
       while (true) {
         if (currentBuffers.size == 0) {
-          outbox.synchronized {
-            outbox.getChunk() match {
+          sendbox.synchronized {
+            sendbox.getChunk() match {
               case Some(chunk) => {
                 val buffers = chunk.buffers
                 // If we have 'seen' pending messages, then reset flag - since we handle that as normal 
                 // registering of event (below)
-                if (needForceReregister && buffers.exists(_.remaining() > 0)) resetForceReregister()
+                if (needReregister && buffers.exists(_.remaining() > 0)) resetReregister()
+
                 currentBuffers ++= buffers
               }
               case None => {
@@ -419,8 +539,8 @@ class SendingConnection(val address: InetSocketAddress, selector_ : Selector,
 
 
 // Must be created within selector loop - else deadlock
-private[spark] class ReceivingConnection(channel_ : SocketChannel, selector_ : Selector)
-  extends Connection(channel_, selector_) {
+private[spark] class ReceivingConnection(channel_ : SocketChannel, selector_ : Selector, id_ : ConnectionId)
+  extends Connection(channel_, selector_, id_) {
 
   class Inbox() {
     val messages = new HashMap[Int, BufferMessage]()
@@ -431,6 +551,7 @@ private[spark] class ReceivingConnection(channel_ : SocketChannel, selector_ : S
         val newMessage = Message.create(header).asInstanceOf[BufferMessage]
         newMessage.started = true
         newMessage.startTime = System.currentTimeMillis
+        newMessage.isSecurityNeg = if (header.securityNeg == 1) true else false
         logDebug(
           "Starting to receive [" + newMessage + "] from [" + getRemoteConnectionManagerId() + "]")
         messages += ((newMessage.id, newMessage))
@@ -583,4 +704,7 @@ private[spark] class ReceivingConnection(channel_ : SocketChannel, selector_ : S
 
   // For read conn, always false.
   override def resetForceReregister(): Boolean = false
+
+  // For read conn, always false.
+  override def resetForceReregisterSecurity(): Boolean = false
 }
