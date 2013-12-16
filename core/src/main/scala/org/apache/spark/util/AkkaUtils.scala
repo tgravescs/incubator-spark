@@ -19,11 +19,13 @@ package org.apache.spark.util
 
 import akka.actor.{ActorSystem, ExtendedActorSystem, IndestructibleActorSystem}
 import com.typesafe.config.ConfigFactory
+import org.apache.hadoop.security.UserGroupInformation
+import org.apache.spark.{Logging, SecurityManager}
 
 /**
  * Various utility classes for working with Akka.
  */
-private[spark] object AkkaUtils {
+private[spark] object AkkaUtils extends Logging {
 
   /**
    * Creates an ActorSystem ready for remoting, with various Spark features. Returns both the
@@ -52,6 +54,11 @@ private[spark] object AkkaUtils {
       System.getProperty("spark.akka.failure-detector.threshold", "300.0").toDouble
     val akkaHeartBeatInterval = System.getProperty("spark.akka.heartbeat.interval", "1000").toInt
 
+    val secretKey = SecurityManager.getSecretKey()
+    val requireCookie = if (secretKey != null) "on" else "off"
+    val secureCookie = if (secretKey != null) secretKey else ""
+    logDebug("In createActorSystem, requireCookie is: " + requireCookie)
+
     val akkaConf = ConfigFactory.parseString(
       s"""
       |akka.daemonic = on
@@ -62,6 +69,8 @@ private[spark] object AkkaUtils {
       |akka.remote.transport-failure-detector.acceptable-heartbeat-pause = $akkaHeartBeatPauses s
       |akka.remote.transport-failure-detector.threshold = $akkaFailureDetector
       |akka.actor.provider = "akka.remote.RemoteActorRefProvider"
+      |akka.remote.netty.require-cookie = $requireCookie
+      |akka.remote.netty.secure-cookie = $secureCookie
       |akka.remote.netty.tcp.transport-class = "akka.remote.transport.netty.NettyTransport"
       |akka.remote.netty.tcp.hostname = "$host"
       |akka.remote.netty.tcp.port = $port

@@ -26,7 +26,9 @@ import scala.collection.JavaConversions._
 
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.{FileSystem, Path}
+import org.apache.hadoop.io.Text
 import org.apache.hadoop.net.NetUtils
+import org.apache.hadoop.security.Credentials
 import org.apache.hadoop.security.UserGroupInformation
 import org.apache.hadoop.util.ShutdownHookManager
 import org.apache.hadoop.yarn.api._
@@ -38,7 +40,7 @@ import org.apache.hadoop.yarn.conf.YarnConfiguration
 import org.apache.hadoop.yarn.ipc.YarnRPC
 import org.apache.hadoop.yarn.util.{ConverterUtils, Records}
 
-import org.apache.spark.{SparkContext, Logging}
+import org.apache.spark.{SparkContext, Logging, SecurityManager}
 import org.apache.spark.util.Utils
 
 
@@ -72,6 +74,15 @@ class ApplicationMaster(args: ApplicationMasterArguments, conf: Configuration) e
     // Use priority 30 as it's higher then HDFS. It's same priority as MapReduce is using.
     ShutdownHookManager.get().addShutdownHook(new AppMasterShutdownHook(this), 30)
 
+     // set the web ui port to be ephemeral for yarn so we don't conflict with
+     // other spark processes running on the same box
+     System.setProperty("spark.ui.port", "0")
+      
+     // generate secret key to be distributed to all the workers
+     if (SecurityManager.isAuthenticationEnabled) {
+       generateSecret()
+     }
+
     appAttemptId = getApplicationAttemptId()
     isLastAMRetry = appAttemptId.getAttemptId() >= maxAppAttempts
     amClient = AMRMClient.createAMRMClient()
@@ -81,6 +92,9 @@ class ApplicationMaster(args: ApplicationMasterArguments, conf: Configuration) e
     // Workaround until hadoop moves to something which has
     // https://issues.apache.org/jira/browse/HADOOP-8406 - fixed in (2.0.2-alpha but no 0.23 line)
     // org.apache.hadoop.io.compress.CompressionCodecFactory.getCodecClasses(conf)
+
+    // setup AmIpFilter for the SparkUI - do this before we start the UI
+    addAmIpFilter()
     
     ApplicationMaster.register(this)
 
@@ -105,6 +119,19 @@ class ApplicationMaster(args: ApplicationMasterArguments, conf: Configuration) e
     System.exit(0)
   }
 
+  // add the yarn amIpFilter that Yarn requires for properly securing the UI
+  private def addAmIpFilter() {
+    val amFilter = "org.apache.hadoop.yarn.server.webproxy.amfilter.AmIpFilter"
+    System.setProperty("spark.ui.filters", amFilter)
+    val proxy = YarnConfiguration.getProxyHostAndPort(conf)
+    val parts : Array[String] = proxy.split(":")
+    val uriBase = "http://" + proxy +
+      System.getenv(ApplicationConstants.APPLICATION_WEB_PROXY_BASE_ENV)
+
+    val params = "PROXY_HOST=" + parts(0) + "," + "PROXY_URI_BASE=" + uriBase
+    System.setProperty("org.apache.hadoop.yarn.server.webproxy.amfilter.AmIpFilter.params", params)
+  }
+
   /** Get the Yarn approved local directories. */
   private def getLocalDirs(): String = {
     // Hadoop 0.23 and 2.x have different Environment variable names for the
@@ -119,6 +146,16 @@ class ApplicationMaster(args: ApplicationMasterArguments, conf: Configuration) e
     }
     localDirs
   }
+
+  private def generateSecret() {
+    val sCookie = akka.util.Crypt.generateSecureCookie
+
+    // add to Hadoop credentials
+    val creds = new Credentials()
+    creds.addSecretKey(new Text("akkaCookie"), sCookie.getBytes());
+    UserGroupInformation.getCurrentUser().addCredentials(creds)
+  }
+
   
   private def getApplicationAttemptId(): ApplicationAttemptId = {
     val envs = System.getenv()
