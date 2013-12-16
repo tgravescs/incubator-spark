@@ -21,7 +21,7 @@ import akka.util.Duration
 
 import javax.servlet.http.HttpServletRequest
 
-import org.eclipse.jetty.server.Handler
+import org.eclipse.jetty.servlet.ServletContextHandler
 
 import org.apache.spark.{Logging, SparkContext}
 import org.apache.spark.ui.JettyUtils._
@@ -34,8 +34,8 @@ private[spark] class BlockManagerUI(val sc: SparkContext) extends Logging {
   val indexPage = new IndexPage(this)
   val rddPage = new RDDPage(this)
 
-  def getHandlers = Seq[(String, Handler)](
-    ("/storage/rdd", (request: HttpServletRequest) => rddPage.render(request)),
-    ("/storage", (request: HttpServletRequest) => indexPage.render(request))
+  def getHandlers = Seq[ServletContextHandler](
+    createServletHandler("/storage/rdd", (request: HttpServletRequest) => rddPage.render(request)),
+    createServletHandler("/storage", (request: HttpServletRequest) => indexPage.render(request))
   )
 }

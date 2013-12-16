@@ -21,12 +21,16 @@ import akka.actor.{ActorSystem, ExtendedActorSystem}
 import com.typesafe.config.ConfigFactory
 import akka.util.duration._
 import akka.remote.RemoteActorRefProvider
+import org.apache.hadoop.security.UserGroupInformation
+import org.apache.hadoop.io.Text
+import org.apache.spark.{Logging, SecurityManager}
+
 
 
 /**
  * Various utility classes for working with Akka.
  */
-private[spark] object AkkaUtils {
+private[spark] object AkkaUtils extends Logging{
 
   /**
    * Creates an ActorSystem ready for remoting, with various Spark features. Returns both the
@@ -43,6 +47,12 @@ private[spark] object AkkaUtils {
     val lifecycleEvents = if (System.getProperty("spark.akka.logLifecycleEvents", "false").toBoolean) "on" else "off"
     // 10 seconds is the default akka timeout, but in a cluster, we need higher by default.
     val akkaWriteTimeout = System.getProperty("spark.akka.writeTimeout", "30").toInt
+
+    val secretKey = SecurityManager.getSecretKey() 
+    val requireCookie = if (secretKey != null) "on" else "off"
+    val secureCookie = if (secretKey != null) secretKey else ""
+    
+    logDebug("In createActorSystem, requireCookie is: " + requireCookie) 
     
     val akkaConf = ConfigFactory.parseString("""
       akka.daemonic = on
@@ -58,8 +68,10 @@ private[spark] object AkkaUtils {
       akka.actor.default-dispatcher.throughput = %d
       akka.remote.log-remote-lifecycle-events = %s
       akka.remote.netty.write-timeout = %ds
+      akka.remote.netty.secure-cookie = "%s"
+      akka.remote.netty.require-cookie = %s
       """.format(host, port, akkaTimeout, akkaFrameSize, akkaThreads, akkaBatchSize,
-        lifecycleEvents, akkaWriteTimeout))
+        lifecycleEvents, akkaWriteTimeout, secureCookie, requireCookie))
 
     val actorSystem = ActorSystem(name, akkaConf)
 

@@ -18,12 +18,12 @@
 package org.apache.spark.broadcast
 
 import java.io.{File, FileOutputStream, ObjectInputStream, OutputStream}
-import java.net.URL
+import java.net.{Authenticator, PasswordAuthentication, URL, URLConnection, URI}
 
 import it.unimi.dsi.fastutil.io.FastBufferedInputStream
 import it.unimi.dsi.fastutil.io.FastBufferedOutputStream
 
-import org.apache.spark.{HttpServer, Logging, SparkEnv}
+import org.apache.spark.{HttpServer, Logging, SecurityManager, SparkEnv}
 import org.apache.spark.io.CompressionCodec
 import org.apache.spark.storage.{BroadcastBlockId, StorageLevel}
 import org.apache.spark.util.{MetadataCleaner, MetadataCleanerType, TimeStampedHashSet, Utils}
@@ -136,12 +136,50 @@ private object HttpBroadcast extends Logging {
   }
 
   def read[T](id: Long): T = {
+    logDebug("broadcast read server: " +  serverUri + " id: broadcast-"+id)
     val url = serverUri + "/" + BroadcastBlockId(id).name
+
+   var uc: URLConnection = null
+    if (SecurityManager.isAuthenticationEnabled()) {
+      val uri = new URI(url)
+      val userCred = SecurityManager.getSecretKey()
+      if (userCred == null) {
+        // if auth is on force the user to specify a password
+        throw new Exception("secret key is null with authentication on")
+      }   
+      val userInfo = SecurityManager.getHttpUser()  + ":" + userCred
+      val newuri = new URI(uri.getScheme(), userInfo, uri.getHost(), uri.getPort(), uri.getPath(),
+        uri.getQuery(), uri.getFragment())
+  
+      uc = newuri.toURL().openConnection()
+      uc.setAllowUserInteraction(false)
+      logDebug("broadcast security enabled")
+
+      // set our own authenticator to properly negotiate user/password
+      Authenticator.setDefault(
+        new Authenticator() {
+          override def getPasswordAuthentication(): PasswordAuthentication = {
+            var passAuth: PasswordAuthentication = null
+            val userInfo = getRequestingURL().getUserInfo()
+            if (userInfo != null) {
+              val  parts = userInfo.split(":", 2)
+              passAuth = new PasswordAuthentication(parts(0), parts(1).toCharArray())
+            }
+            return passAuth
+          }  
+        }
+      ); 
+    } else {
+      logDebug("broadcast not using security")
+      uc = new URL(url).openConnection()
+    }
+
+    val stream = uc.getInputStream();
     val in = {
       if (compress) {
-        compressionCodec.compressedInputStream(new URL(url).openStream())
+        compressionCodec.compressedInputStream(stream)
       } else {
-        new FastBufferedInputStream(new URL(url).openStream(), bufferSize)
+        new FastBufferedInputStream(stream, bufferSize)
       }
     }
     val ser = SparkEnv.get.serializer.newInstance()
