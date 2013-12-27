@@ -1054,7 +1054,7 @@ private[spark] class BitTorrentBroadcast[T](@transient var value_ : T, isLocal: 
 
 private[spark] class BitTorrentBroadcastFactory
 extends BroadcastFactory {
-  def initialize(isDriver: Boolean) { MultiTracker.initialize(isDriver) }
+  def initialize(isDriver: Boolean, securityManager: SecurityManager) { MultiTracker.initialize(isDriver) }
 
   def newBroadcast[T](value_ : T, isLocal: Boolean, id: Long) =
     new BitTorrentBroadcast[T](value_, isLocal, id)

@@ -38,7 +38,7 @@ import akka.util.duration._
 import org.apache.spark.util.Utils
 
 
-private[spark] class ConnectionManager(port: Int) extends Logging {
+private[spark] class ConnectionManager(port: Int, securityManager: SecurityManager) extends Logging {
 
   class MessageStatus(
       val message: Message,
@@ -86,7 +86,7 @@ private[spark] class ConnectionManager(port: Int) extends Logging {
 
   private var onReceiveCallback: (BufferMessage, ConnectionManagerId) => Option[Message]= null
 
-  private val authEnabled = SecurityManager.isAuthenticationEnabled()
+  private val authEnabled = securityManager.isAuthenticationEnabled()
 
   serverChannel.configureBlocking(false)
   serverChannel.socket.setReuseAddress(true)
@@ -541,7 +541,7 @@ private[spark] class ConnectionManager(port: Int) extends Logging {
         connection.synchronized {
           if (connection.sparkSaslServer == null) {
             logDebug("Creating sasl Server")
-            connection.sparkSaslServer = new SparkSaslServer()
+            connection.sparkSaslServer = new SparkSaslServer(securityManager)
           }
         }
         replyToken = connection.sparkSaslServer.response(securityMsg.getToken)
@@ -671,7 +671,7 @@ private[spark] class ConnectionManager(port: Int) extends Logging {
     if (!conn.isSaslComplete()) {
       conn.synchronized {
         if (conn.sparkSaslClient == null) {
-          conn.sparkSaslClient = new SparkSaslClient()
+          conn.sparkSaslClient = new SparkSaslClient(securityManager)
           var firstResponse: Array[Byte] = null
           try {
             firstResponse = conn.sparkSaslClient.firstToken()
@@ -801,7 +801,7 @@ private[spark] class ConnectionManager(port: Int) extends Logging {
 private[spark] object ConnectionManager {
 
   def main(args: Array[String]) {
-    val manager = new ConnectionManager(9999)
+    val manager = new ConnectionManager(9999, new SecurityManager())
     manager.onReceiveMessage((msg: Message, id: ConnectionManagerId) => {
       println("Received [" + msg + "] from [" + id + "]")
       None

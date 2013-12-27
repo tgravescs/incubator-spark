@@ -51,11 +51,11 @@ public class SparkSaslClient {
   /**
    * Create a SaslClient for authentication with BSP servers.
    */
-  public SparkSaslClient() {
+  public SparkSaslClient(SecurityManager securityMgr) {
     try {
       saslClient = Sasl.createSaslClient(new String[] { SparkSaslServer.DIGEST },
           null, null, SparkSaslServer.SASL_DEFAULT_REALM,
-          SparkSaslServer.SASL_PROPS, new SparkSaslClientCallbackHandler());
+          SparkSaslServer.SASL_PROPS, new SparkSaslClientCallbackHandler(securityMgr));
     } catch (IOException e) {
       LOG.error("SaslClient: Could not create SaslClient");
       saslClient = null;
@@ -123,10 +123,10 @@ public class SparkSaslClient {
     /**
      * Constructor
      */
-    public SparkSaslClientCallbackHandler() {
+    public SparkSaslClientCallbackHandler(SecurityManager securityMgr) {
       this.userName = SparkSaslServer.
-        encodeIdentifier(SecurityManager.getSaslUser().getBytes());
-      String secretKey = SecurityManager.getSecretKey();
+        encodeIdentifier(securityMgr.getSaslUser().getBytes());
+      String secretKey = securityMgr.getSecretKey() ; 
       String passwd = (secretKey != null) ? secretKey : "";
       this.userPassword = SparkSaslServer.encodePassword(passwd.getBytes());
     }

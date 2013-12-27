@@ -56,42 +56,8 @@ private object SecurityManager extends Logging {
 
   /**
    * Gets the secret key if security is enabled, else returns null.
-   * In Yarn mode its uses Hadoop UGI to pass the secret as that
-   * will keep it protected.  For a standalone SPARK cluster
-   * use a environment variable SPARK_SECRET to specify the secret.
-   * This probably isn't ideal but only the user who starts the process
-   * should have access to view the variable (atleast on Linux).
    */
   def getSecretKey(): String = {
-    if (isAuthenticationEnabled()) {
-      if (SparkHadoopUtil.get.isYarnMode) {
-        val credentials = SparkHadoopUtil.get.getCurrentUserCredentials()
-        if (credentials != null) { 
-          val secretKey = credentials.getSecretKey(new Text("akkaCookie"))
-          if (secretKey != null) {
-            logDebug("in yarn mode")
-            return new Text(secretKey).toString
-          } else {
-            logDebug("getSecretKey: yarn mode, secret key is null")
-          }
-        } else {
-          logDebug("getSecretKey: yarn mode, credentials are null")
-        }
-        return null
-      } else {
-        // java property used for testing - env variable should be used normally
-        val secret = System.getProperty("SPARK_SECRET", System.getenv("SPARK_SECRET")) 
-        if (secret != null && !secret.isEmpty()) {
-          logDebug("getSecretKey: secret is set")
-          return secret
-        } else {
-          logDebug("getSecretKey: secret key is null")
-        }
-        return null
-      }
-    } else {
-      logDebug("getSecretKey: auth off")
-    }
-    return null
+    return secretKey
   }
 }

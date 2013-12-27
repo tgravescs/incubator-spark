@@ -31,7 +31,7 @@ import akka.serialization.SerializationExtension
 import akka.util.duration._
 import akka.util.{Duration, Timeout}
 
-import org.apache.spark.{Logging, SparkException}
+import org.apache.spark.{Logging, SparkException, SecurityManager}
 import org.apache.spark.deploy.{ApplicationDescription, ExecutorState}
 import org.apache.spark.deploy.DeployMessages._
 import org.apache.spark.deploy.master.MasterMessages._
@@ -551,7 +551,7 @@ private[spark] object Master {
   }
 
   def startSystemAndActor(host: String, port: Int, webUiPort: Int): (ActorSystem, Int, Int) = {
-    val (actorSystem, boundPort) = AkkaUtils.createActorSystem(systemName, host, port)
+    val (actorSystem, boundPort) = AkkaUtils.createActorSystem(systemName, host, port, new SecurityManager())
     val actor = actorSystem.actorOf(Props(new Master(host, boundPort, webUiPort)), name = actorName)
     val timeoutDuration = Duration.create(
       System.getProperty("spark.akka.askTimeout", "10").toLong, "seconds")

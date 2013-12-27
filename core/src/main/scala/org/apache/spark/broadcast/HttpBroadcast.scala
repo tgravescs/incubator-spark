@@ -63,7 +63,7 @@ private[spark] class HttpBroadcast[T](@transient var value_ : T, isLocal: Boolea
 }
 
 private[spark] class HttpBroadcastFactory extends BroadcastFactory {
-  def initialize(isDriver: Boolean) { HttpBroadcast.initialize(isDriver) }
+  def initialize(isDriver: Boolean, securityMgr: SecurityManager) { HttpBroadcast.initialize(isDriver, securityMgr) }
 
   def newBroadcast[T](value_ : T, isLocal: Boolean, id: Long) =
     new HttpBroadcast[T](value_, isLocal, id)
@@ -79,15 +79,17 @@ private object HttpBroadcast extends Logging {
   private var bufferSize: Int = 65536
   private var serverUri: String = null
   private var server: HttpServer = null
+  private var securityManager: SecurityManager = null
 
   private val files = new TimeStampedHashSet[String]
   private val cleaner = new MetadataCleaner(MetadataCleanerType.HTTP_BROADCAST, cleanup)
 
   private lazy val compressionCodec = CompressionCodec.createCodec()
 
-  def initialize(isDriver: Boolean) {
+  def initialize(isDriver: Boolean, securityMgr: SecurityManager) {
     synchronized {
       if (!initialized) {
+        securityManager = securityMgr
         bufferSize = System.getProperty("spark.buffer.size", "65536").toInt
         compress = System.getProperty("spark.broadcast.compress", "true").toBoolean
         if (isDriver) {
@@ -112,7 +114,7 @@ private object HttpBroadcast extends Logging {
 
   private def createServer() {
     broadcastDir = Utils.createTempDir(Utils.getLocalDir)
-    server = new HttpServer(broadcastDir)
+    server = new HttpServer(broadcastDir, securityManager)
     server.start()
     serverUri = server.uri
     System.setProperty("spark.httpBroadcast.uri", serverUri)
@@ -140,14 +142,14 @@ private object HttpBroadcast extends Logging {
     val url = serverUri + "/" + BroadcastBlockId(id).name
 
    var uc: URLConnection = null
-    if (SecurityManager.isAuthenticationEnabled()) {
+    if (securityManager.isAuthenticationEnabled()) {
       val uri = new URI(url)
-      val userCred = SecurityManager.getSecretKey()
+      val userCred = securityManager.getSecretKey()
       if (userCred == null) {
         // if auth is on force the user to specify a password
         throw new Exception("secret key is null with authentication on")
       }   
-      val userInfo = SecurityManager.getHttpUser()  + ":" + userCred
+      val userInfo = securityManager.getHttpUser()  + ":" + userCred
       val newuri = new URI(uri.getScheme(), userInfo, uri.getHost(), uri.getPort(), uri.getPath(),
         uri.getQuery(), uri.getFragment())
   

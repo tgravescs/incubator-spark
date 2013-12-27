@@ -251,12 +251,16 @@ private[spark] object Utils extends Logging {
         logInfo("Fetching " + url + " to " + tempFile)
 
         var uc: URLConnection = null
-        if (SecurityManager.isAuthenticationEnabled()) {
-          val userCred = SecurityManager.getSecretKey()
+        // First try to get the security Manager from the SparkEnv. If that doesn't exist, create
+        // a new one and rely on the configs being set
+        val sparkEnv = SparkEnv.get
+        val securityMgr = if (sparkEnv != null) sparkEnv.securityManager else new SecurityManager()
+        if (securityMgr.isAuthenticationEnabled()) {
+          val userCred = securityMgr.getSecretKey()
           if (userCred == null) {
             throw new Exception("secret key is null with authentication on")
           }
-          val userInfo = SecurityManager.getHttpUser()  + ":" + userCred
+          val userInfo = securityMgr.getHttpUser()  + ":" + userCred
           val newuri = new URI(uri.getScheme(), userInfo, uri.getHost(), uri.getPort(), 
             uri.getPath(), uri.getQuery(), uri.getFragment())
           uc = newuri.toURL().openConnection()

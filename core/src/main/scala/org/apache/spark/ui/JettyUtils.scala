@@ -33,6 +33,7 @@ import org.eclipse.jetty.servlet.{DefaultServlet, FilterHolder, ServletContextHa
 import org.eclipse.jetty.util.thread.QueuedThreadPool
 
 import org.apache.spark.Logging
+import org.apache.spark.SparkEnv
 import org.apache.spark.SecurityManager
 
 
@@ -57,7 +58,11 @@ private[spark] object JettyUtils extends Logging {
     new HttpServlet {
       override def doGet(request: HttpServletRequest,
                  response: HttpServletResponse) {
-        if (SecurityManager.checkUIViewPermissions(request.getRemoteUser())) {
+        // First try to get the security Manager from the SparkEnv. If that doesn't exist, create
+        // a new one and rely on the configs being set
+        val sparkEnv = SparkEnv.get
+        val securityMgr = if (sparkEnv != null) sparkEnv.securityManager else new SecurityManager()
+        if (securityMgr.checkUIViewPermissions(request.getRemoteUser())) {
           response.setContentType("%s;charset=utf-8".format(contentType))
           response.setStatus(HttpServletResponse.SC_OK)
           val result = responder(request)

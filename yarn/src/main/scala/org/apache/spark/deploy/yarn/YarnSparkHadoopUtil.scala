@@ -46,4 +46,8 @@ class YarnSparkHadoopUtil extends SparkHadoopUtil {
     UserGroupInformation.getCurrentUser().getCredentials()
   }
 
+  override def addCurrentUserCredentials(creds: Credentials) { 
+    UserGroupInformation.getCurrentUser().addCredentials(creds)
+  }
+
 }

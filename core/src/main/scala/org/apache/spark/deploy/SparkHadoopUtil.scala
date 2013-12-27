@@ -67,6 +67,8 @@ class SparkHadoopUtil {
   def isYarnMode(): Boolean = { false }
 
   def getCurrentUserCredentials(): Credentials = { null }
+
+  def addCurrentUserCredentials(creds: Credentials) {}
 }
 
 object SparkHadoopUtil {

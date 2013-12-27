@@ -41,7 +41,7 @@ private[spark] class ServerStateException(message: String) extends Exception(mes
  * as well as classes created by the interpreter when the user types in code. This is just a wrapper
  * around a Jetty server.
  */
-private[spark] class HttpServer(resourceBase: File) extends Logging {
+private[spark] class HttpServer(resourceBase: File, securityManager: SecurityManager) extends Logging {
   private var server: Server = null
   private var port: Int = -1
 
@@ -62,7 +62,7 @@ private[spark] class HttpServer(resourceBase: File) extends Logging {
       val resHandler = new ResourceHandler
       resHandler.setResourceBase(resourceBase.getAbsolutePath)
 
-      if (SecurityManager.isAuthenticationEnabled()) {
+      if (securityManager.isAuthenticationEnabled()) {
         logDebug("server is using security")
         val constraint = new Constraint()
         constraint.setName(Constraint.__DIGEST_AUTH)
@@ -81,11 +81,11 @@ private[spark] class HttpServer(resourceBase: File) extends Logging {
         // JAASLoginService for other options. 
         val hashLogin = new HashLoginService()
 
-        val userCred = new Password(SecurityManager.getSecretKey())
+        val userCred = new Password(securityManager.getSecretKey())
         if (userCred == null) {
           throw new Exception("secret key is null with authentication on")
         }
-        hashLogin.putUser(SecurityManager.getHttpUser(), userCred, Array("user"))
+        hashLogin.putUser(securityManager.getHttpUser(), userCred, Array("user"))
 
         logDebug("hashlogin loading user: " + hashLogin.getUsers())
 

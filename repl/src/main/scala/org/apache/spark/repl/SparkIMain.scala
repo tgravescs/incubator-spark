@@ -28,6 +28,7 @@ import scala.reflect.NameTransformer
 import SparkIMain._
 
 import org.apache.spark.HttpServer
+import org.apache.spark.SecurityManager
 import org.apache.spark.util.Utils
 import org.apache.spark.SparkEnv
 
@@ -99,7 +100,7 @@ class SparkIMain(val settings: Settings, protected val out: PrintWriter) extends
   val virtualDirectory = new PlainFile(outputDir)
 
   /** Jetty server that will serve our classes to worker nodes */
-  val classServer = new HttpServer(outputDir)
+  val classServer = new HttpServer(outputDir, new SecurityManager())
 
   // Start the classServer and store its URI in a spark system property
   // (which will be passed to executors so that they can connect to it)

@@ -35,7 +35,6 @@ abstract class Connection(val channel: SocketChannel, val selector: Selector,
     val socketRemoteConnectionManagerId: ConnectionManagerId, val connectionId: ConnectionId)
   extends Logging {
 
-  val authEnabled = SecurityManager.isAuthenticationEnabled()
   var sparkSaslServer : SparkSaslServer = null
   var sparkSaslClient : SparkSaslClient = null
 

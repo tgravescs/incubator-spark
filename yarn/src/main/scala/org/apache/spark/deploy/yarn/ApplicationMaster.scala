@@ -27,9 +27,6 @@ import scala.collection.JavaConversions._
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.{FileSystem, Path}
 import org.apache.hadoop.net.NetUtils
-import org.apache.hadoop.io.Text
-import org.apache.hadoop.security.Credentials
-import org.apache.hadoop.security.UserGroupInformation
 import org.apache.hadoop.util.ShutdownHookManager
 import org.apache.hadoop.yarn.api._
 import org.apache.hadoop.yarn.api.records._
@@ -75,11 +72,6 @@ class ApplicationMaster(args: ApplicationMasterArguments, conf: Configuration) e
      // other spark processes running on the same box
      System.setProperty("spark.ui.port", "0")
       
-     // generate secret key to be distributed to all the workers
-     if (SecurityManager.isAuthenticationEnabled) {
-       generateSecret()
-     }
-    
     appAttemptId = getApplicationAttemptId()
     isLastAMRetry = appAttemptId.getAttemptId() >= maxAppAttempts
     resourceManager = registerWithResourceManager()
@@ -155,15 +147,6 @@ class ApplicationMaster(args: ApplicationMasterArguments, conf: Configuration) e
       throw new Exception("Yarn Local dirs can't be empty")
     }
     localDirs
-  }
-
-  private def generateSecret() {
-    val sCookie = akka.util.Crypt.generateSecureCookie
-
-    // add to Hadoop credentials
-    val creds = new Credentials()
-    creds.addSecretKey(new Text("akkaCookie"), sCookie.getBytes());
-    UserGroupInformation.getCurrentUser().addCredentials(creds)
   }
 
   private def getApplicationAttemptId(): ApplicationAttemptId = {

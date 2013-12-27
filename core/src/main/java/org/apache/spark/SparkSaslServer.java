@@ -58,12 +58,12 @@ public class SparkSaslServer {
   /**
    * Constructor
    */
-  public SparkSaslServer() {
+  public SparkSaslServer(SecurityManager securityMgr) {
     try {
       SASL_PROPS.put(Sasl.QOP, "auth");
       SASL_PROPS.put(Sasl.SERVER_AUTH, "true");
       saslServer = Sasl.createSaslServer(DIGEST, null, SASL_DEFAULT_REALM, SASL_PROPS,
-        new SaslDigestCallbackHandler());
+        new SaslDigestCallbackHandler(securityMgr));
     } catch (SaslException e) {
       LOG.error("SparkSaslServer: Could not create SaslServer: " + e);
       saslServer = null;
@@ -133,10 +133,14 @@ public class SparkSaslServer {
   /** CallbackHandler for SASL DIGEST-MD5 mechanism */
   public static class SaslDigestCallbackHandler implements CallbackHandler {
 
+    private SecurityManager securityManager; 
+
     /**
      * Constructor
      */
-    public SaslDigestCallbackHandler() {}
+    public SaslDigestCallbackHandler(SecurityManager securityMgr) {
+      this.securityManager = securityMgr;
+    }
 
     @Override
     public void handle(Callback[] callbacks) throws IOException,
@@ -161,7 +165,7 @@ public class SparkSaslServer {
       }
       if (pc != null) {
         char[] password =
-          encodePassword(SecurityManager.getSecretKey().getBytes());
+          encodePassword(securityManager.getSecretKey().getBytes());
         pc.setPassword(password);
       }
 

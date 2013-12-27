@@ -54,7 +54,8 @@ class SparkEnv (
     val connectionManager: ConnectionManager,
     val httpFileServer: HttpFileServer,
     val sparkFilesDir: String,
-    val metricsSystem: MetricsSystem) {
+    val metricsSystem: MetricsSystem,
+    val securityManager: SecurityManager) {
 
   private val pythonWorkers = mutable.HashMap[(String, Map[String, String]), PythonWorkerFactory]()
 
@@ -116,7 +117,8 @@ object SparkEnv extends Logging {
       isDriver: Boolean,
       isLocal: Boolean): SparkEnv = {
 
-    val (actorSystem, boundPort) = AkkaUtils.createActorSystem("spark", hostname, port)
+    val securityManager = new SecurityManager()
+    val (actorSystem, boundPort) = AkkaUtils.createActorSystem("spark", hostname, port, securityManager)
 
     // Bit of a hack: If this is the driver and our port was 0 (meaning bind to any free port),
     // figure out which port number Akka actually bound to and set spark.driver.port to it.
@@ -142,7 +144,6 @@ object SparkEnv extends Logging {
       val name = System.getProperty(propertyName, defaultClassName)
       Class.forName(name, true, classLoader).newInstance().asInstanceOf[T]
     }
-
     val serializerManager = new SerializerManager
 
     val serializer = serializerManager.setDefault(
@@ -168,11 +169,11 @@ object SparkEnv extends Logging {
     val blockManagerMaster = new BlockManagerMaster(registerOrLookup(
       "BlockManagerMaster",
       new BlockManagerMasterActor(isLocal)))
-    val blockManager = new BlockManager(executorId, actorSystem, blockManagerMaster, serializer)
+    val blockManager = new BlockManager(executorId, actorSystem, blockManagerMaster, serializer, securityManager)
 
     val connectionManager = blockManager.connectionManager
 
-    val broadcastManager = new BroadcastManager(isDriver)
+    val broadcastManager = new BroadcastManager(isDriver, securityManager)
 
     val cacheManager = new CacheManager(blockManager)
 
@@ -186,7 +187,7 @@ object SparkEnv extends Logging {
     val shuffleFetcher = instantiateClass[ShuffleFetcher](
       "spark.shuffle.fetcher", "org.apache.spark.BlockStoreShuffleFetcher")
 
-    val httpFileServer = new HttpFileServer()
+    val httpFileServer = new HttpFileServer(securityManager)
     httpFileServer.initialize()
     System.setProperty("spark.fileserver.uri", httpFileServer.serverUri)
 
@@ -226,6 +227,7 @@ object SparkEnv extends Logging {
       connectionManager,
       httpFileServer,
       sparkFilesDir,
-      metricsSystem)
+      metricsSystem, 
+      securityManager)
   }
 }

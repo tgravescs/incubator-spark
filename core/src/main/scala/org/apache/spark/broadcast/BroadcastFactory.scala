@@ -16,6 +16,7 @@
  */
 
 package org.apache.spark.broadcast
+import org.apache.spark.SecurityManager
 
 /**
  * An interface for all the broadcast implementations in Spark (to allow 
@@ -24,7 +25,7 @@ package org.apache.spark.broadcast
  * entire Spark job.
  */
 private[spark] trait BroadcastFactory {
-  def initialize(isDriver: Boolean): Unit
+  def initialize(isDriver: Boolean, securityMgr: SecurityManager): Unit
   def newBroadcast[T](value: T, isLocal: Boolean, id: Long): Broadcast[T]
   def stop(): Unit
 }

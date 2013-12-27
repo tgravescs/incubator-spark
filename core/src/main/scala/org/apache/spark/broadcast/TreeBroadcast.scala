@@ -595,7 +595,7 @@ extends Broadcast[T](id) with Logging with Serializable {
 
 private[spark] class TreeBroadcastFactory
 extends BroadcastFactory {
-  def initialize(isDriver: Boolean) { MultiTracker.initialize(isDriver) }
+  def initialize(isDriver: Boolean, securityMgr: SecurityManager) { MultiTracker.initialize(isDriver) }
 
   def newBroadcast[T](value_ : T, isLocal: Boolean, id: Long) =
     new TreeBroadcast[T](value_, isLocal, id)

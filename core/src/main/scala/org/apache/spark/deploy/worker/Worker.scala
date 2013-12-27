@@ -27,7 +27,7 @@ import akka.actor._
 import akka.remote.{RemoteClientLifeCycleEvent, RemoteClientShutdown, RemoteClientDisconnected}
 import akka.util.duration._
 
-import org.apache.spark.Logging
+import org.apache.spark.{Logging, SecurityManager}
 import org.apache.spark.deploy.{ExecutorDescription, ExecutorState}
 import org.apache.spark.deploy.DeployMessages._
 import org.apache.spark.deploy.master.Master
@@ -279,7 +279,8 @@ private[spark] object Worker {
     : (ActorSystem, Int) = {
     // The LocalSparkCluster runs multiple local sparkWorkerX actor systems
     val systemName = "sparkWorker" + workerNumber.map(_.toString).getOrElse("")
-    val (actorSystem, boundPort) = AkkaUtils.createActorSystem(systemName, host, port)
+    val (actorSystem, boundPort) = AkkaUtils.createActorSystem(systemName, host, 
+      port, new SecurityManager())
     val actor = actorSystem.actorOf(Props(new Worker(host, boundPort, webUiPort, cores, memory,
       masterUrls, workDir)), name = "Worker")
     (actorSystem, boundPort)

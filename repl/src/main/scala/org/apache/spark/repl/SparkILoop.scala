@@ -849,18 +849,22 @@ class SparkILoop(in0: Option[BufferedReader], val out: PrintWriter, val master: 
     if (uri != null) {
       System.setProperty("spark.executor.uri", uri)
     }
+    val jars = Option(System.getenv("ADD_JARS")).map(_.split(','))
+                                                .getOrElse(new Array[String](0))
+                                                .map(new java.io.File(_).getAbsolutePath)
+    sparkContext = new SparkContext(getMaster(), "Spark shell", System.getenv("SPARK_HOME"), jars)
+    sparkContext
+  }
+
+  private def getMaster(): String = { 
     val master = this.master match {
       case Some(m) => m
       case None => {
         val prop = System.getenv("MASTER")
         if (prop != null) prop else "local"
-      }
+     }
     }
-    val jars = Option(System.getenv("ADD_JARS")).map(_.split(','))
-                                                .getOrElse(new Array[String](0))
-                                                .map(new java.io.File(_).getAbsolutePath)
-    sparkContext = new SparkContext(master, "Spark shell", System.getenv("SPARK_HOME"), jars)
-    sparkContext
+    master
   }
 
   def process(settings: Settings): Boolean = {
@@ -874,6 +878,8 @@ class SparkILoop(in0: Option[BufferedReader], val out: PrintWriter, val master: 
     // Add JARS specified in Spark's ADD_JARS variable to classpath
     val jars = Option(System.getenv("ADD_JARS")).map(_.split(',')).getOrElse(new Array[String](0))
     jars.foreach(settings.classpath.append(_))
+
+    if (getMaster() == "yarn-client") System.setProperty("SPARK_YARN_MODE", "true")
 
     this.settings = settings
     createInterpreter()

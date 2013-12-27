@@ -39,7 +39,7 @@ private[spark] object AkkaUtils extends Logging{
    * Note: the `name` parameter is important, as even if a client sends a message to right
    * host + port, if the system name is incorrect, Akka will drop the message.
    */
-  def createActorSystem(name: String, host: String, port: Int): (ActorSystem, Int) = {
+  def createActorSystem(name: String, host: String, port: Int, securityManager: SecurityManager): (ActorSystem, Int) = {
     val akkaThreads = System.getProperty("spark.akka.threads", "4").toInt
     val akkaBatchSize = System.getProperty("spark.akka.batchSize", "15").toInt
     val akkaTimeout = System.getProperty("spark.akka.timeout", "60").toInt
@@ -48,9 +48,13 @@ private[spark] object AkkaUtils extends Logging{
     // 10 seconds is the default akka timeout, but in a cluster, we need higher by default.
     val akkaWriteTimeout = System.getProperty("spark.akka.writeTimeout", "30").toInt
 
-    val secretKey = SecurityManager.getSecretKey() 
-    val requireCookie = if (secretKey != null) "on" else "off"
-    val secureCookie = if (secretKey != null) secretKey else ""
+    val secretKey = securityManager.getSecretKey()
+    val isAuthOn = securityManager.isAuthenticationEnabled()
+    if (isAuthOn && secretKey == null) {
+      throw new Exception("Secret key is null with authentication on")
+    }
+    val requireCookie = if (isAuthOn) "on" else "off"
+    val secureCookie = if (isAuthOn) secretKey else ""
     
     logDebug("In createActorSystem, requireCookie is: " + requireCookie) 
     
