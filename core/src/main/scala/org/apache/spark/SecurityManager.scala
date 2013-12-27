@@ -29,8 +29,8 @@ import org.apache.spark.deploy.SparkHadoopUtil
  */
 private[spark] class SecurityManager extends Logging {
 
-  private val isAuthOn = System.getProperty("spark.authenticate", "true").toBoolean
-  private val isUIAuthOn = System.getProperty("spark.authenticate.ui", "true").toBoolean
+  private val isAuthOn = System.getProperty("spark.authenticate", "false").toBoolean
+  private val isUIAuthOn = System.getProperty("spark.authenticate.ui", "false").toBoolean
   private val viewAcls = System.getProperty("spark.ui.view.acls", "").split(',').map(_.trim()).toSet
   private val secretKey = generateSecretKey()
   logDebug("is auth enabled = " + isAuthOn + " is uiAuth enabled = " + isUIAuthOn)
