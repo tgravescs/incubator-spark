@@ -36,6 +36,7 @@ import org.apache.hadoop.yarn.client.api.AMRMClient.ContainerRequest
 import org.apache.hadoop.yarn.conf.YarnConfiguration
 import org.apache.hadoop.yarn.ipc.YarnRPC
 import org.apache.hadoop.yarn.util.{ConverterUtils, Records}
+import org.apache.hadoop.yarn.webapp.util.WebAppUtils;
 
 import org.apache.spark.{SparkContext, Logging, SecurityManager}
 import org.apache.spark.util.Utils
@@ -116,7 +117,7 @@ class ApplicationMaster(args: ApplicationMasterArguments, conf: Configuration) e
   private def addAmIpFilter() {
     val amFilter = "org.apache.hadoop.yarn.server.webproxy.amfilter.AmIpFilter"
     System.setProperty("spark.ui.filters", amFilter)
-    val proxy = YarnConfiguration.getProxyHostAndPort(conf)
+    val proxy = WebAppUtils.getProxyHostAndPort(conf)
     val parts : Array[String] = proxy.split(":")
     val uriBase = "http://" + proxy +
       System.getenv(ApplicationConstants.APPLICATION_WEB_PROXY_BASE_ENV)

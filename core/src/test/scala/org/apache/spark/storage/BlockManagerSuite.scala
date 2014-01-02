@@ -53,7 +53,7 @@ class BlockManagerSuite extends FunSuite with BeforeAndAfter with PrivateMethodT
   def rdd(rddId: Int, splitId: Int) = RDDBlockId(rddId, splitId)
 
   before {
-    val (actorSystem, boundPort) = AkkaUtils.createActorSystem("test", "localhost", 0)
+    val (actorSystem, boundPort) = AkkaUtils.createActorSystem("test", "localhost", 0, securityMgr)
     this.actorSystem = actorSystem
     System.setProperty("spark.driver.port", boundPort.toString)
     System.setProperty("spark.hostPort", "localhost:" + boundPort)
