@@ -22,11 +22,12 @@ import scala.concurrent.duration.{Duration, FiniteDuration}
 import akka.actor.{ActorSystem, ExtendedActorSystem, IndestructibleActorSystem}
 import com.typesafe.config.ConfigFactory
 import org.apache.spark.SparkConf
+import org.apache.spark.{Logging, SecurityManager}
 
 /**
  * Various utility classes for working with Akka.
  */
-private[spark] object AkkaUtils {
+private[spark] object AkkaUtils extends Logging {
 
   /**
    * Creates an ActorSystem ready for remoting, with various Spark features. Returns both the
@@ -39,7 +40,7 @@ private[spark] object AkkaUtils {
    * of a fatal exception. This is used by [[org.apache.spark.executor.Executor]].
    */
   def createActorSystem(name: String, host: String, port: Int, indestructible: Boolean = false,
-    conf: SparkConf): (ActorSystem, Int) = {
+    conf: SparkConf, securityManager: SecurityManager): (ActorSystem, Int) = {
 
     val akkaThreads   = conf.get("spark.akka.threads", "4").toInt
     val akkaBatchSize = conf.get("spark.akka.batchSize", "15").toInt
@@ -54,6 +55,15 @@ private[spark] object AkkaUtils {
     val akkaFailureDetector =
       conf.get("spark.akka.failure-detector.threshold", "300.0").toDouble
     val akkaHeartBeatInterval = conf.get("spark.akka.heartbeat.interval", "1000").toInt
+
+    val secretKey = securityManager.getSecretKey()
+    val isAuthOn = securityManager.isAuthenticationEnabled()
+    if (isAuthOn && secretKey == null) {
+      throw new Exception("Secret key is null with authentication on")
+    }
+    val requireCookie = if (isAuthOn) "on" else "off"
+    val secureCookie = if (isAuthOn) secretKey else ""
+    logDebug("In createActorSystem, requireCookie is: " + requireCookie)
 
     val akkaConf = ConfigFactory.parseString(
       s"""
@@ -74,6 +84,8 @@ private[spark] object AkkaUtils {
       |akka.remote.netty.tcp.execution-pool-size = $akkaThreads
       |akka.actor.default-dispatcher.throughput = $akkaBatchSize
       |akka.remote.log-remote-lifecycle-events = $lifecycleEvents
+      |akka.remote.netty.require-cookie = $requireCookie
+      |akka.remote.netty.secure-cookie = $secureCookie
       """.stripMargin)
 
     val actorSystem = if (indestructible) {

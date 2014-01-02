@@ -42,6 +42,7 @@ private[spark] class YarnClientSchedulerBackend(
     var workerCores = System.getenv("SPARK_WORKER_CORES")
     var workerMemory = System.getenv("SPARK_WORKER_MEMORY")
     var workerNumber = System.getenv("SPARK_WORKER_INSTANCES")
+    var queue = System.getenv("SPARK_YARN_QUEUE")
 
     if (userJar == null)
       throw new SparkException("env SPARK_YARN_APP_JAR is not set")
@@ -64,6 +65,7 @@ private[spark] class YarnClientSchedulerBackend(
       "--worker-memory", workerMemory,
       "--worker-cores", workerCores,
       "--num-workers", workerNumber,
+      "--queue", queue,
       "--master-class", "org.apache.spark.deploy.yarn.WorkerLauncher"
     )
 

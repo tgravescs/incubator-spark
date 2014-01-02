@@ -931,16 +931,9 @@ class SparkILoop(in0: Option[BufferedReader], protected val out: JPrintWriter,
 
   def createSparkContext(): SparkContext = {
     val execUri = System.getenv("SPARK_EXECUTOR_URI")
-    val master = this.master match {
-      case Some(m) => m
-      case None => {
-        val prop = System.getenv("MASTER")
-        if (prop != null) prop else "local"
-      }
-    }
     val jars = SparkILoop.getAddedJars.map(new java.io.File(_).getAbsolutePath)
     val conf = new SparkConf()
-      .setMaster(master)
+      .setMaster(getMaster())
       .setAppName("Spark shell")
       .setSparkHome(System.getenv("SPARK_HOME"))
       .setJars(jars)
@@ -951,6 +944,17 @@ class SparkILoop(in0: Option[BufferedReader], protected val out: JPrintWriter,
     sparkContext = new SparkContext(conf)
     echo("Created spark context..")
     sparkContext
+  }
+
+  private def getMaster(): String = {
+    val master = this.master match {
+      case Some(m) => m
+      case None => {
+        val prop = System.getenv("MASTER")
+        if (prop != null) prop else "local"
+      }
+    }
+    master
   }
 
   /** process command-line arguments and do as they request */
@@ -1009,6 +1013,8 @@ object SparkILoop {
           settings.classpath.value = sys.props("java.class.path")
 
         getAddedJars.foreach(settings.classpath.append(_))
+
+        if (getMaster() == "yarn-client") System.setProperty("SPARK_YARN_MODE", "true")
 
         repl process settings
       }
